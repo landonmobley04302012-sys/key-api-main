@@ -77,6 +77,7 @@ app.post('/check', async (req, res) => {
 });
 
 app.post('/claim/:game', async (req, res) => {
+  console.log('POST /claim/:game called', req.params.game, req.body);
   const { game } = req.params;
   const { user_id, device_id } = req.body;
   if (!user_id || !device_id) return res.status(400).json({ error: 'missing user_id or device_id' });
