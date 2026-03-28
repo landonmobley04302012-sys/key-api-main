@@ -12,11 +12,12 @@ mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error(err));
 
+// ========== Schemas ==========
 const keySchema = new mongoose.Schema({
   key: { type: String, unique: true, required: true },
   game: { type: String, required: true, default: 'bee_swarm' },
-  userId: { type: String },
-  deviceId: { type: String },
+  userId: { type: String },      // Discord ID of the key owner
+  deviceId: { type: String },    // device token from Roblox script
   expiresAt: { type: Date },
   createdAt: { type: Date, default: Date.now }
 });
@@ -38,8 +39,7 @@ function generateKey() {
   return crypto.randomBytes(12).toString('hex').toUpperCase();
 }
 
-// === Public endpoints ===
-
+// ========== Public endpoints ==========
 app.post('/validate', async (req, res) => {
   const { key, deviceId } = req.body;
   if (!key || !deviceId) return res.status(400).json({ error: 'missing fields' });
@@ -100,6 +100,7 @@ app.get('/key-info', async (req, res) => {
     exists: true,
     expiresAt: record.expiresAt,
     bound: !!record.deviceId,
+    claimed: !!record.userId,
     game: record.game,
     userId: record.userId
   });
@@ -128,7 +129,39 @@ app.post('/unbind', async (req, res) => {
   res.json({ success: true, message: 'Key unbound. You can now use it on a new device.' });
 });
 
-// === Admin endpoints ===
+app.post('/redeem', async (req, res) => {
+  const { key, discordId } = req.body;
+  if (!key || !discordId) return res.status(400).json({ error: 'missing fields' });
+  const record = await Key.findOne({ key });
+  if (!record) return res.status(404).json({ error: 'Key not found' });
+  if (record.expiresAt && record.expiresAt < new Date()) {
+    return res.status(400).json({ error: 'Key expired' });
+  }
+  if (record.userId) {
+    return res.status(400).json({ error: 'Key already claimed' });
+  }
+  record.userId = discordId;
+  await record.save();
+  res.json({ success: true, message: 'Key claimed successfully!' });
+});
+
+app.post('/reset-hwid', async (req, res) => {
+  const { key, discordId } = req.body;
+  if (!key || !discordId) return res.status(400).json({ error: 'missing fields' });
+  const record = await Key.findOne({ key });
+  if (!record) return res.status(404).json({ error: 'Key not found' });
+  if (record.userId !== discordId) {
+    return res.status(403).json({ error: 'This key does not belong to you' });
+  }
+  if (record.expiresAt && record.expiresAt < new Date()) {
+    return res.status(400).json({ error: 'Key expired' });
+  }
+  record.deviceId = null;
+  await record.save();
+  res.json({ success: true, message: 'HWID reset. Next time you run the script, it will bind to your new device.' });
+});
+
+// ========== Admin endpoints ==========
 app.post('/admin/create', async (req, res) => {
   const { secret, game, duration_days, userId, deviceId } = req.body;
   if (secret !== process.env.ADMIN_SECRET) return res.status(401).json({ error: 'unauthorized' });
