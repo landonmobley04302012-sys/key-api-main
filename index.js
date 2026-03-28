@@ -8,10 +8,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// === Simple GET routes to test if the API is alive ===
+app.get('/', (req, res) => res.send('API is alive'));
+app.get('/test', (req, res) => res.json({ status: 'ok', time: new Date() }));
+
+// === MongoDB connection ===
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error(err));
 
+// === Schemas ===
 const keySchema = new mongoose.Schema({
   key: { type: String, unique: true, required: true },
   game: { type: String, required: true, default: 'bee_swarm' },
@@ -32,6 +38,7 @@ function generateKey() {
   return crypto.randomBytes(12).toString('hex').toUpperCase();
 }
 
+// === API Endpoints ===
 app.post('/validate', async (req, res) => {
   const { key, deviceId } = req.body;
   if (!key || !deviceId) return res.status(400).json({ error: 'missing fields' });
