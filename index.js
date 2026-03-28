@@ -8,16 +8,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// === Simple GET routes to test if the API is alive ===
-app.get('/', (req, res) => res.send('API is alive'));
-app.get('/test', (req, res) => res.json({ status: 'ok', time: new Date() }));
-
-// === MongoDB connection ===
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error(err));
 
-// === Schemas ===
 const keySchema = new mongoose.Schema({
   key: { type: String, unique: true, required: true },
   game: { type: String, required: true, default: 'bee_swarm' },
@@ -34,11 +28,18 @@ const blacklistSchema = new mongoose.Schema({
 });
 const Blacklist = mongoose.model('Blacklist', blacklistSchema);
 
+const unbindAttemptSchema = new mongoose.Schema({
+  key: { type: String, unique: true },
+  lastUnbind: { type: Date, default: Date.now }
+});
+const UnbindAttempt = mongoose.model('UnbindAttempt', unbindAttemptSchema);
+
 function generateKey() {
   return crypto.randomBytes(12).toString('hex').toUpperCase();
 }
 
-// === API Endpoints ===
+// === Public endpoints ===
+
 app.post('/validate', async (req, res) => {
   const { key, deviceId } = req.body;
   if (!key || !deviceId) return res.status(400).json({ error: 'missing fields' });
@@ -88,6 +89,46 @@ app.post('/claim/:game', async (req, res) => {
   res.json({ key: newKey });
 });
 
+app.get('/key-info', async (req, res) => {
+  const { key } = req.query;
+  if (!key) return res.status(400).json({ error: 'missing key' });
+  const record = await Key.findOne({ key });
+  if (!record) return res.json({ valid: false, exists: false });
+  const valid = !record.expiresAt || record.expiresAt > new Date();
+  res.json({
+    valid,
+    exists: true,
+    expiresAt: record.expiresAt,
+    bound: !!record.deviceId,
+    game: record.game,
+    userId: record.userId
+  });
+});
+
+app.post('/unbind', async (req, res) => {
+  const { key } = req.body;
+  if (!key) return res.status(400).json({ error: 'missing key' });
+  const record = await Key.findOne({ key });
+  if (!record) return res.status(404).json({ error: 'key not found' });
+  if (record.expiresAt && record.expiresAt < new Date()) {
+    return res.status(400).json({ error: 'key expired' });
+  }
+  let attempt = await UnbindAttempt.findOne({ key });
+  if (attempt && attempt.lastUnbind > new Date(Date.now() - 24 * 60 * 60 * 1000)) {
+    return res.status(429).json({ error: 'You can only unbind once per 24 hours. Try again later.' });
+  }
+  record.deviceId = null;
+  await record.save();
+  if (attempt) {
+    attempt.lastUnbind = new Date();
+    await attempt.save();
+  } else {
+    await UnbindAttempt.create({ key, lastUnbind: new Date() });
+  }
+  res.json({ success: true, message: 'Key unbound. You can now use it on a new device.' });
+});
+
+// === Admin endpoints ===
 app.post('/admin/create', async (req, res) => {
   const { secret, game, duration_days, userId, deviceId } = req.body;
   if (secret !== process.env.ADMIN_SECRET) return res.status(401).json({ error: 'unauthorized' });
@@ -103,6 +144,23 @@ app.post('/admin/blacklist', async (req, res) => {
   const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000);
   await Blacklist.findOneAndUpdate({ identifier }, { expiresAt }, { upsert: true });
   res.json({ success: true });
+});
+
+app.post('/admin/list-keys', async (req, res) => {
+  const { secret } = req.body;
+  if (secret !== process.env.ADMIN_SECRET) return res.status(401).json({ error: 'unauthorized' });
+  const keys = await Key.find({}, { key: 0 }); // exclude the key field
+  res.json(keys);
+});
+
+app.post('/admin/unbind', async (req, res) => {
+  const { secret, key } = req.body;
+  if (secret !== process.env.ADMIN_SECRET) return res.status(401).json({ error: 'unauthorized' });
+  const record = await Key.findOne({ key });
+  if (!record) return res.status(404).json({ error: 'key not found' });
+  record.deviceId = null;
+  await record.save();
+  res.json({ success: true, message: 'Key unbound by admin.' });
 });
 
 const PORT = process.env.PORT || 3000;
