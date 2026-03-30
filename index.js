@@ -1,3 +1,4 @@
+// index.js – Final Backend API
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -39,7 +40,7 @@ const UnbindAttempt = mongoose.model('UnbindAttempt', unbindAttemptSchema);
 const pendingClaimSchema = new mongoose.Schema({
   code: { type: String, unique: true, required: true },
   userId: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now, expires: 3600 } // auto‑delete after 1 hour
+  createdAt: { type: Date, default: Date.now, expires: 3600 }
 });
 const PendingClaim = mongoose.model('PendingClaim', pendingClaimSchema);
 
