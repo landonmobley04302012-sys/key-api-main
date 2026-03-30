@@ -257,5 +257,12 @@ app.post('/admin/keys', async (req, res) => {
   res.json(keys);
 });
 
+app.post('/admin/pending-claim', async (req, res) => {
+  const { code, userId } = req.body;
+  if (!code || !userId) return res.status(400).json({ error: 'missing code or userId' });
+  await PendingClaim.create({ code, userId });
+  res.json({ success: true });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`API running on port ${PORT}`));
