@@ -1,4 +1,3 @@
-// index.js – Final Backend API
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -125,6 +124,25 @@ app.get('/key-info', async (req, res) => {
     game: record.game,
     userId: record.userId
   });
+});
+
+app.get('/validate-get', async (req, res) => {
+  const { key, deviceId } = req.query;
+  if (!key || !deviceId) return res.status(400).json({ error: 'missing key or deviceId' });
+  const record = await Key.findOne({ key });
+  if (!record) return res.json({ valid: false, reason: 'not_found' });
+  if (record.expiresAt && record.expiresAt < new Date()) {
+    return res.json({ valid: false, reason: 'expired' });
+  }
+  if (!record.deviceId) {
+    record.deviceId = deviceId;
+    await record.save();
+    return res.json({ valid: true, expiresAt: record.expiresAt });
+  }
+  if (record.deviceId !== deviceId) {
+    return res.json({ valid: false, reason: 'device_mismatch' });
+  }
+  res.json({ valid: true, expiresAt: record.expiresAt });
 });
 
 app.post('/unbind', async (req, res) => {
@@ -263,6 +281,18 @@ app.post('/admin/pending-claim', async (req, res) => {
   if (!code || !userId) return res.status(400).json({ error: 'missing code or userId' });
   await PendingClaim.create({ code, userId });
   res.json({ success: true });
+});
+
+// New admin endpoint: unbind a user's key by Discord ID
+app.post('/admin/unbind-by-user', async (req, res) => {
+  const { secret, userId } = req.body;
+  if (secret !== process.env.ADMIN_SECRET) return res.status(401).json({ error: 'unauthorized' });
+  if (!userId) return res.status(400).json({ error: 'missing userId' });
+  const record = await Key.findOne({ userId });
+  if (!record) return res.status(404).json({ error: 'No key found for that user' });
+  record.deviceId = null;
+  await record.save();
+  res.json({ success: true, message: `Key for user ${userId} unbound.` });
 });
 
 const PORT = process.env.PORT || 3000;
